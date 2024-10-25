@@ -104,23 +104,40 @@ class RestaurantController {
   }
 
   async delete(req: Request, res: Response): Promise<any> {
+    // Extract restaurant_id and review_id from the request parameters
     const { restaurant_id, review_id } = req.params;
+    
     try {
+      // Generate the Redis key for the list of reviews associated with the restaurant
       const reviewKey = reviewKeyById(restaurant_id);
-      console.log(review_id,restaurant_id);
+  
+      // Log the IDs to ensure they were extracted correctly
+      console.log(review_id, restaurant_id);
+  
+      // Generate the Redis key for the specific review details based on review_id
       const reviewDetailsKey = reviewDetailsKeyById(review_id);
+  
+      // Execute both deletion operations in parallel:
+      // - Remove the review ID from the restaurant's review list
+      // - Delete the detailed review data from Redis
       const [removeResult, deleteResult] = await Promise.all([
-        redis.lrem(reviewKey, 0, review_id),
-        redis.del(reviewDetailsKey),
+        redis.lrem(reviewKey, 0, review_id), // Remove review_id from the list
+        redis.del(reviewDetailsKey),          // Delete the review details entry
       ]);
+  
+      // Check if both deletions were unsuccessful (keys not found)
       if (removeResult === 0 && deleteResult === 0) {
         console.log(removeResult, deleteResult);
         return res.status(404).json({ message: "Review not found" });
       }
-      return res.status(200).json({ reviews: review_id ,"message": "review deleted" });
+  
+      // If deletion was successful, return a success response with the review ID
+      return res.status(200).json({ reviews: review_id, message: "Review deleted" });
     } catch (error) {
+      // Log any error that occurs during deletion
       console.log(error);
     }
   }
+  
 }
 export const restaurantController = new RestaurantController(); // Export an instance of RestaurantController

@@ -8,12 +8,34 @@ import {
   cuisinesKey,
   restaurantCuisinesKeyById,
   restaurantKeyById,
+  restaurantsByRatingKey,
   reviewDetailsKeyById,
   reviewKeyById,
 } from "../Utils/key"; // Import utility functions for generating Redis keys based on IDs
 
+
 class RestaurantController {
   
+  async paginate(req: Request, res: Response): Promise<any>{
+    const { page = 1, limit = 10 } = req.query; // Pagination parameters with default values
+    const start = (Number(page) - 1) * Number(limit); // Calculate starting index
+    const end = start + Number(limit) - 1; // Calculate ending index
+    try{
+      const  restaurantIds= await redis.zrange(
+             restaurantsByRatingKey
+             ,start
+             ,end,
+             'WITHSCORES'
+      )
+      const restaurants = await  Promise.all( 
+        restaurantIds.map((id)=> redis.hgetall(restaurantKeyById(id)))
+        
+      )
+      return res.status(200).json({"restaurants": restaurants});  
+  }catch (error) {
+console.log(error);
+  }
+}
   // Retrieves a list of reviews for a specific restaurant with pagination
   async getList(req: Request, res: Response): Promise<any> {
     const restaurantId = req.params.id; // Restaurant ID from the URL parameters
@@ -55,10 +77,23 @@ class RestaurantController {
         restaurantId,
       };
 
-      await Promise.all([
+      const [reviewCountRaw, setResult, totalStarsRaw] = await Promise.all([
         redis.lpush(reviewKey, reviewId), // Add review ID to Redis list
         redis.hset(reviewDetailsKey, reviewData), // Store review details in Redis hash
+        redis.hincrbyfloat(restaurantKey, "totalStars", rating), // Increment total stars
       ]);
+
+ // Ensure reviewCount is a number
+const reviewCount = Number(reviewCountRaw);
+// Ensure totalStars is a number
+const totalStars = Number(totalStarsRaw);
+
+const averageRating = Number((totalStars / reviewCount).toFixed(1));
+
+await Promise.all([
+  redis.zadd(restaurantsByRatingKey, averageRating,restaurantId),
+   redis.hset(restaurantKey,'avgStars',averageRating)
+])
       res.status(200).json({ viewData: reviewData }); // Respond with the created review data
     } catch (err) {
       console.log(err); // Log error if any occurs
@@ -93,7 +128,8 @@ class RestaurantController {
             redis.sadd(restaurantCuisinesKeyById(id), cuisine), // Link cuisine to the restaurant
           ])
         ),
-        await redis.hset(restaurantKey, hashData) // Store restaurant details in Redis hash
+        await redis.hset(restaurantKey, hashData), // Store restaurant details in Redis hash
+        await redis.zadd(restaurantsByRatingKey, 0,id )
       ]);
 
       return res.status(201).json({ "redis": hashData }); // Respond with created restaurant data

@@ -3,6 +3,7 @@ import { Request, Response } from "express"; // Import Request and Response type
 import { RestaurantCreate } from "../Validation/RestaurantValidation"; // Import the validation schema for restaurant creation
 import redis from "../configs/redis"; // Import the Redis instance from the configuration
 import shortid from "shortid"; // Import shortid to generate unique IDs for reviews
+
 import {
   cuisineKey,
   cuisinesKey,
@@ -13,29 +14,66 @@ import {
   reviewKeyById,
 } from "../Utils/key"; // Import utility functions for generating Redis keys based on IDs
 
-
 class RestaurantController {
-  
-  async paginate(req: Request, res: Response): Promise<any>{
+  async details(req: Request, res: Response): Promise<any> {
+    const restaurantId = req.params.id; // Restaurant ID from the URL parameters
+    try {
+      const restaurantKey = restaurantKeyById(restaurantId); // Generate Redis key for the restaurant
+      const restaurantExists = await redis.exists(restaurantKey); // Check if the restaurant exists in Redis
+      if (!restaurantExists) {
+        return res.status(404).json({ message: "not found" }); // Return if restaurant is not found
+      }
+      const data = req.body;
+      const restaurantDetailsKey = restaurantCuisinesKeyById(restaurantId);
+      const keyType = await redis.type(restaurantDetailsKey);
+      if (keyType !== 'none' && keyType !== 'ReJSON-RL') {
+        await redis.del(restaurantDetailsKey); // Delete key if it exists with the wrong type
+      }
+      await redis.call('JSON.SET', restaurantDetailsKey, '.', JSON.stringify(data));     
+      return res.status(200).json({ message: "restaurants detail  added" });
+    } catch (error) {
+      console.log(error);
+    }
+  }
+
+  async getDetails(req: Request, res: Response): Promise<any> {
+    const restaurantId = req.params.id; 
+    try {
+      const restaurantKey = restaurantKeyById(restaurantId); 
+      const restaurantExists = await redis.exists(restaurantKey); 
+      if (!restaurantExists) {
+        return res.status(404).json({ message: "not found" });
+      }
+ 
+      const restaurantDetailsKey = restaurantCuisinesKeyById(restaurantId);
+      const details =  await redis.call('JSON.GET', restaurantDetailsKey,'.');
+
+      const parsedDetails = JSON.parse(details as string); 
+      return res.status(200).json(parsedDetails);
+    } catch (error) {
+      console.log(error);
+    }
+  }
+
+  async paginate(req: Request, res: Response): Promise<any> {
     const { page = 1, limit = 10 } = req.query; // Pagination parameters with default values
     const start = (Number(page) - 1) * Number(limit); // Calculate starting index
     const end = start + Number(limit) - 1; // Calculate ending index
-    try{
-      const  restaurantIds= await redis.zrange(
-             restaurantsByRatingKey
-             ,start
-             ,end,
-             'WITHSCORES'
-      )
-      const restaurants = await  Promise.all( 
-        restaurantIds.map((id)=> redis.hgetall(restaurantKeyById(id)))
-        
-      )
-      return res.status(200).json({"restaurants": restaurants});  
-  }catch (error) {
-console.log(error);
+    try {
+      const restaurantIds = await redis.zrange(
+        restaurantsByRatingKey,
+        start,
+        end,
+        "WITHSCORES"
+      );
+      const restaurants = await Promise.all(
+        restaurantIds.map((id) => redis.hgetall(restaurantKeyById(id)))
+      );
+      return res.status(200).json({ restaurants: restaurants });
+    } catch (error) {
+      console.log(error);
+    }
   }
-}
   // Retrieves a list of reviews for a specific restaurant with pagination
   async getList(req: Request, res: Response): Promise<any> {
     const restaurantId = req.params.id; // Restaurant ID from the URL parameters
@@ -62,13 +100,13 @@ console.log(error);
       const restaurantKey = restaurantKeyById(restaurantId); // Generate Redis key for the restaurant
       const restaurantExists = await redis.exists(restaurantKey); // Check if the restaurant exists in Redis
       if (!restaurantExists) {
-        return res.status(200).json({ "message": "not found Restaurant" }); // Return if restaurant is not found
+        return res.status(200).json({ message: "not found Restaurant" }); // Return if restaurant is not found
       }
 
       const reviewId = shortid.generate(); // Generate unique ID for the review
       const reviewKey = reviewKeyById(restaurantId); // Redis key for storing the review ID list
       const { review, rating } = req.body; // Extract review and rating from request body
-       
+
       const reviewDetailsKey = reviewDetailsKeyById(reviewId); // Generate Redis key for storing review details
       const reviewData = {
         id: reviewId,
@@ -83,17 +121,17 @@ console.log(error);
         redis.hincrbyfloat(restaurantKey, "totalStars", rating), // Increment total stars
       ]);
 
- // Ensure reviewCount is a number
-const reviewCount = Number(reviewCountRaw);
-// Ensure totalStars is a number
-const totalStars = Number(totalStarsRaw);
+      // Ensure reviewCount is a number
+      const reviewCount = Number(reviewCountRaw);
+      // Ensure totalStars is a number
+      const totalStars = Number(totalStarsRaw);
 
-const averageRating = Number((totalStars / reviewCount).toFixed(1));
+      const averageRating = Number((totalStars / reviewCount).toFixed(1));
 
-await Promise.all([
-  redis.zadd(restaurantsByRatingKey, averageRating,restaurantId),
-   redis.hset(restaurantKey,'avgStars',averageRating)
-])
+      await Promise.all([
+        redis.zadd(restaurantsByRatingKey, averageRating, restaurantId),
+        redis.hset(restaurantKey, "avgStars", averageRating),
+      ]);
       res.status(200).json({ viewData: reviewData }); // Respond with the created review data
     } catch (err) {
       console.log(err); // Log error if any occurs
@@ -117,7 +155,7 @@ await Promise.all([
       const hashData = {
         name: restaurant.name,
         location: restaurant.location,
-        id
+        id,
       };
 
       await Promise.all([
@@ -129,10 +167,10 @@ await Promise.all([
           ])
         ),
         await redis.hset(restaurantKey, hashData), // Store restaurant details in Redis hash
-        await redis.zadd(restaurantsByRatingKey, 0,id )
+        await redis.zadd(restaurantsByRatingKey, 0, id),
       ]);
 
-      return res.status(201).json({ "redis": hashData }); // Respond with created restaurant data
+      return res.status(201).json({ redis: hashData }); // Respond with created restaurant data
     } catch (error) {
       console.log(error); // Log error if any occurs
     }
@@ -177,7 +215,9 @@ await Promise.all([
         return res.status(404).json({ message: "Review not found" }); // Return if review is not found
       }
 
-      return res.status(200).json({ reviews: review_id, message: "Review deleted" }); // Respond with deletion confirmation
+      return res
+        .status(200)
+        .json({ reviews: review_id, message: "Review deleted" }); // Respond with deletion confirmation
     } catch (error) {
       console.log(error); // Log error if any occurs
     }

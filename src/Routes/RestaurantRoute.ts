@@ -8,6 +8,6 @@ routerIndex.post("/review/:id", restaurantController.review.bind(restaurantContr
 routerIndex.get("/get-list/:id", restaurantController.getList.bind(restaurantController));
 routerIndex.delete("/:restaurant_id/reviews/:review_id", restaurantController.delete.bind(restaurantController));
 routerIndex.get("/paginate",restaurantController.paginate.bind(restaurantController));
-
-
+routerIndex.post("/:id/details",restaurantController.details.bind(restaurantController));
+routerIndex.get("/:id/details",restaurantController.getDetails.bind(restaurantController));
 export default routerIndex;

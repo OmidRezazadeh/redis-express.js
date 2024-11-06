@@ -3,10 +3,11 @@ import { Request, Response } from "express"; // Import Request and Response type
 import { RestaurantCreate } from "../Validation/RestaurantValidation"; // Import the validation schema for restaurant creation
 import redis from "../configs/redis"; // Import the Redis instance from the configuration
 import shortid from "shortid"; // Import shortid to generate unique IDs for reviews
-
+const { createIndex } = require('../seed/createIndex');
 import {
   cuisineKey,
   cuisinesKey,
+  indexKey,
   restaurantCuisinesKeyById,
   restaurantKeyById,
   restaurantsByRatingKey,
@@ -47,7 +48,6 @@ class RestaurantController {
  
       const restaurantDetailsKey = restaurantCuisinesKeyById(restaurantId);
       const details =  await redis.call('JSON.GET', restaurantDetailsKey,'.');
-
       const parsedDetails = JSON.parse(details as string); 
       return res.status(200).json(parsedDetails);
     } catch (error) {
@@ -199,7 +199,7 @@ class RestaurantController {
   }
 
   // Deletes a specific review for a restaurant
-  async delete(req: Request, res: Response): Promise<any> {
+  async delete(req: Request,  res: Response): Promise<any> {
     const { restaurant_id, review_id } = req.params; // Extract restaurant and review IDs from URL parameters
 
     try {
@@ -222,6 +222,12 @@ class RestaurantController {
       console.log(error); // Log error if any occurs
     }
   }
+  async search(req: Request, res: Response): Promise<any> {
+    const { q } = req.query;
+    const results = await redis.call('FT.SEARCH', indexKey,  `@name:{${q}}`);
+     res.json({'Search results:': results})
+}
+
 }
 
 export const restaurantController = new RestaurantController();
